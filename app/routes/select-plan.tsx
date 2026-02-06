@@ -1,24 +1,43 @@
 // app/routes/select-plan.tsx
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { json, redirect } from "@react-router/node";
-import { useLoaderData, useSubmit } from "react-router";
-import React, { useCallback } from "react";
-import { Page, Layout, Card, BlockStack, Text, Button, InlineStack } from "@shopify/polaris";
+import type { LoaderFunctionArgs } from "react-router";
+import React, { useCallback, useMemo, useState } from "react";
+import { useLoaderData, useNavigate } from "react-router";
+import { redirect } from "@react-router/node";
+import { authenticate } from "../shopify.server";
 
-// ✅ IMPORTANTE: NADA de shopify.server aqui em cima no client
+import {
+  Page,
+  Layout,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  Button,
+  Box,
+  Banner,
+  InlineGrid,
+} from "@shopify/polaris";
 
 type LoaderData = {
   ok: true;
   shop: string;
-  plans: Array<{ key: "STARTER" | "PRO" | "SCALE"; name: string; price: string }>;
+  plans: Array<{
+    key: "STARTER" | "PRO" | "SCALE";
+    name: string;
+    price: string;
+  }>;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // ✅ shopify.server só dentro do loader/action
-  const { authenticate } = await import("../shopify.server");
+  // garante sessão (ajusta se o teu helper for outro)
   const { session } = await authenticate.admin(request);
 
-  return json<LoaderData>({
+  // se por algum motivo não houver shop, manda para auth
+  if (!session?.shop) {
+    throw redirect("/auth");
+  }
+
+  const data: LoaderData = {
     ok: true,
     shop: session.shop,
     plans: [
@@ -26,61 +45,118 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { key: "PRO", name: "Pro", price: "€12 / mês" },
       { key: "SCALE", name: "Scale", price: "€30 / mês" },
     ],
+  };
+
+  // ✅ sem json() — para não rebentar no Render
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authenticate } = await import("../shopify.server");
-  const { session } = await authenticate.admin(request);
+export default function SelectPlanPage() {
+  const data = useLoaderData() as LoaderData;
+  const navigate = useNavigate();
 
-  const form = await request.formData();
-  const planKey = String(form.get("plan") || "");
-
-  // Aqui chamas o teu endpoint de billing subscribe (ou fazes direto)
-  // Exemplo: redirecionar para a rota que faz subscribe
-  if (!["STARTER", "PRO", "SCALE"].includes(planKey)) {
-    return json({ ok: false, error: "Plano inválido" }, { status: 400 });
-  }
-
-  return redirect(`/app/billing?plan=${planKey}&shop=${encodeURIComponent(session.shop)}`);
-}
-
-export default function SelectPlanRoute() {
-  const data = useLoaderData<typeof loader>();
-  const submit = useSubmit();
+  const [error, setError] = useState<string | null>(null);
+  const [isLoadingKey, setIsLoadingKey] = useState<LoaderData["plans"][number]["key"] | null>(null);
 
   const onChoose = useCallback(
-    (plan: string) => {
-      const fd = new FormData();
-      fd.set("plan", plan);
-      submit(fd, { method: "post" });
+    async (planKey: LoaderData["plans"][number]["key"]) => {
+      setError(null);
+      setIsLoadingKey(planKey);
+
+      try {
+        const res = await fetch("/app/api/billing/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ planKey }),
+        });
+
+        const text = await res.text();
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = null;
+        }
+
+        if (!res.ok) {
+          const msg =
+            parsed && typeof parsed === "object" && parsed !== null && "error" in parsed
+              ? String(parsed.error)
+              : text || `Request failed (${res.status})`;
+          setError(msg);
+          return;
+        }
+
+        // backend deve devolver { ok: true, confirmationUrl?: string }
+        if (parsed?.confirmationUrl) {
+          window.top?.location.assign(parsed.confirmationUrl);
+          return;
+        }
+
+        // fallback: volta para /app
+        navigate("/app");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erro desconhecido");
+      } finally {
+        setIsLoadingKey(null);
+      }
     },
-    [submit],
+    [navigate],
   );
 
+  const subtitle = useMemo(() => `Loja: ${data.shop}`, [data.shop]);
+
   return (
-    <Page title="Escolher plano">
+    <Page title="Escolher plano" subtitle={subtitle}>
       <Layout>
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
+              {error ? (
+                <Banner tone="critical" title="Erro">
+                  <p>{error}</p>
+                </Banner>
+              ) : null}
+
               <Text as="p" tone="subdued">
-                Loja: {data.shop}
+                Escolhe um plano para ativares a subscrição.
               </Text>
 
-              <InlineStack gap="300" wrap>
+              <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
                 {data.plans.map((p) => (
-                  <Card key={p.key} padding="400">
+                  <Box
+                    key={p.key}
+                    borderColor="border"
+                    borderWidth="025"
+                    borderRadius="200"
+                    padding="300"
+                    background="bg-surface"
+                  >
                     <BlockStack gap="200">
-                      <Text as="h2" variant="headingMd">{p.name}</Text>
-                      <Text as="p" tone="subdued">{p.price}</Text>
-                      <Button variant="primary" onClick={() => onChoose(p.key)}>
-                        Escolher {p.name}
-                      </Button>
+                      <Text as="h3" variant="headingMd">
+                        {p.name}
+                      </Text>
+                      <Text as="p" tone="subdued">
+                        {p.price}
+                      </Text>
+
+                      <InlineStack align="end">
+                        <Button
+                          variant="primary"
+                          loading={isLoadingKey === p.key}
+                          onClick={() => onChoose(p.key)}
+                        >
+                          Escolher
+                        </Button>
+                      </InlineStack>
                     </BlockStack>
-                  </Card>
+                  </Box>
                 ))}
-              </InlineStack>
+              </InlineGrid>
             </BlockStack>
           </Card>
         </Layout.Section>
