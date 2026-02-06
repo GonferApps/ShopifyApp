@@ -1,7 +1,7 @@
 // app/routes/select-plan.tsx
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { json, redirect } from "react-router";
-import { useLoaderData, useSubmit } from "react-router";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@react-router/node";
+import { json, redirect } from "@react-router/node";
+import { useLoaderData, useSubmit } from "@react-router/node";
 import React, { useCallback } from "react";
 import { Page, Layout, Card, BlockStack, Text, Button, InlineStack } from "@shopify/polaris";
 
