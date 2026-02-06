@@ -1,176 +1,88 @@
+// app/routes/select-plan.tsx
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
-import { authenticate, PLAN_STARTER, PLAN_PRO, PLAN_SCALE } from "../shopify.server";
+import { json, redirect } from "react-router";
+import { useLoaderData, useSubmit } from "react-router";
+import React, { useCallback } from "react";
+import { Page, Layout, Card, BlockStack, Text, Button, InlineStack } from "@shopify/polaris";
 
-import {
-  Page,
-  Layout,
-  Card,
-  BlockStack,
-  InlineStack,
-  Text,
-  Button,
-  Banner,
-  Badge,
-} from "@shopify/polaris";
+// ✅ IMPORTANTE: NADA de shopify.server aqui em cima no client
 
 type LoaderData = {
   ok: true;
-  hasActivePayment: boolean;
-  activePlanName: string | null;
+  shop: string;
+  plans: Array<{ key: "STARTER" | "PRO" | "SCALE"; name: string; price: string }>;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { billing } = await authenticate.admin(request);
+  // ✅ shopify.server só dentro do loader/action
+  const { authenticate } = await import("../shopify.server");
+  const { session } = await authenticate.admin(request);
 
-  const check = await billing.check({
-    plans: [PLAN_STARTER, PLAN_PRO, PLAN_SCALE],
-    isTest: true, // em produção mete false
-  });
-
-  const active = check.appSubscriptions?.[0] ?? null;
-
-  return {
+  return json<LoaderData>({
     ok: true,
-    hasActivePayment: Boolean(check.hasActivePayment),
-    activePlanName: active ? String(active.name) : null,
-  } satisfies LoaderData;
+    shop: session.shop,
+    plans: [
+      { key: "STARTER", name: "Starter", price: "€7 / mês" },
+      { key: "PRO", name: "Pro", price: "€12 / mês" },
+      { key: "SCALE", name: "Scale", price: "€30 / mês" },
+    ],
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { billing } = await authenticate.admin(request);
+  const { authenticate } = await import("../shopify.server");
+  const { session } = await authenticate.admin(request);
 
-  const body = await request.formData();
-  const plan = String(body.get("plan") || "");
+  const form = await request.formData();
+  const planKey = String(form.get("plan") || "");
 
-  const allowed = [PLAN_STARTER, PLAN_PRO, PLAN_SCALE];
-  if (!allowed.includes(plan)) {
-    return new Response(JSON.stringify({ ok: false, error: "Plano inválido." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  // Aqui chamas o teu endpoint de billing subscribe (ou fazes direto)
+  // Exemplo: redirecionar para a rota que faz subscribe
+  if (!["STARTER", "PRO", "SCALE"].includes(planKey)) {
+    return json({ ok: false, error: "Plano inválido" }, { status: 400 });
   }
 
-  // Redirect para a confirmação/pagamento no admin
-  return billing.request({
-    plan,
-    isTest: true, // em produção mete false
-    // se quiseres forçar o retorno:
-    // returnUrl: "https://admin.shopify.com/store/XXX/apps/YYY/app/select-plan"
-  });
+  return redirect(`/app/billing?plan=${planKey}&shop=${encodeURIComponent(session.shop)}`);
 }
 
-function PlanCard(props: {
-  title: string;
-  price: string;
-  perks: string[];
-  isCurrent: boolean;
-  planKey: string;
-}) {
-  const fetcher = useFetcher();
-  const isSubmitting = fetcher.state !== "idle";
-
-  return (
-    <Card>
-      <BlockStack gap="300">
-        <InlineStack align="space-between" blockAlign="center">
-          <Text as="h3" variant="headingMd">
-            {props.title}
-          </Text>
-          {props.isCurrent ? <Badge tone="success">Ativo</Badge> : null}
-        </InlineStack>
-
-        <Text as="p" variant="headingLg">
-          {props.price}
-        </Text>
-
-        <BlockStack gap="150">
-          {props.perks.map((p) => (
-            <Text key={p} as="p" tone="subdued">
-              • {p}
-            </Text>
-          ))}
-        </BlockStack>
-
-        <fetcher.Form method="post">
-          <input type="hidden" name="plan" value={props.planKey} />
-          <Button
-            variant={props.isCurrent ? "secondary" : "primary"}
-            submit
-            disabled={props.isCurrent}
-            loading={isSubmitting}
-          >
-            {props.isCurrent ? "Plano atual" : "Escolher plano"}
-          </Button>
-        </fetcher.Form>
-      </BlockStack>
-    </Card>
-  );
-}
-
-export default function SelectPlanPage() {
+export default function SelectPlanRoute() {
   const data = useLoaderData<typeof loader>();
+  const submit = useSubmit();
+
+  const onChoose = useCallback(
+    (plan: string) => {
+      const fd = new FormData();
+      fd.set("plan", plan);
+      submit(fd, { method: "post" });
+    },
+    [submit],
+  );
 
   return (
-    <Page title="Subscrição">
+    <Page title="Escolher plano">
       <Layout>
         <Layout.Section>
-          <BlockStack gap="400">
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h2" variant="headingMd">
-                  Escolhe o teu plano
-                </Text>
-                <Text as="p" tone="subdued">
-                  Vais ser redirecionado para o admin da Shopify para confirmar a subscrição.
-                </Text>
+          <Card>
+            <BlockStack gap="400">
+              <Text as="p" tone="subdued">
+                Loja: {data.shop}
+              </Text>
 
-                {data.hasActivePayment ? (
-                  <Banner tone="success" title="Já tens uma subscrição ativa">
-                    <p>
-                      Plano atual: <strong>{data.activePlanName}</strong>
-                    </p>
-                  </Banner>
-                ) : (
-                  <Banner tone="info" title="Sem subscrição ativa">
-                    <p>Escolhe um plano para continuares.</p>
-                  </Banner>
-                )}
-              </BlockStack>
-            </Card>
-
-            <Layout>
-              <Layout.Section variant="oneThird">
-                <PlanCard
-                  title="Starter"
-                  price="7€ / mês"
-                  perks={["Force cents", "Round tiers", "Suporte básico"]}
-                  isCurrent={data.activePlanName === PLAN_STARTER}
-                  planKey={PLAN_STARTER}
-                />
-              </Layout.Section>
-
-              <Layout.Section variant="oneThird">
-                <PlanCard
-                  title="Pro"
-                  price="12€ / mês"
-                  perks={["Tudo do Starter", "Mais automações", "Prioridade no suporte"]}
-                  isCurrent={data.activePlanName === PLAN_PRO}
-                  planKey={PLAN_PRO}
-                />
-              </Layout.Section>
-
-              <Layout.Section variant="oneThird">
-                <PlanCard
-                  title="Scale"
-                  price="30€ / mês"
-                  perks={["Tudo do Pro", "Ferramentas avançadas", "Suporte premium"]}
-                  isCurrent={data.activePlanName === PLAN_SCALE}
-                  planKey={PLAN_SCALE}
-                />
-              </Layout.Section>
-            </Layout>
-          </BlockStack>
+              <InlineStack gap="300" wrap>
+                {data.plans.map((p) => (
+                  <Card key={p.key} padding="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">{p.name}</Text>
+                      <Text as="p" tone="subdued">{p.price}</Text>
+                      <Button variant="primary" onClick={() => onChoose(p.key)}>
+                        Escolher {p.name}
+                      </Button>
+                    </BlockStack>
+                  </Card>
+                ))}
+              </InlineStack>
+            </BlockStack>
+          </Card>
         </Layout.Section>
       </Layout>
     </Page>
