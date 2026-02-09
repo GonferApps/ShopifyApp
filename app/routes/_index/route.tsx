@@ -7,8 +7,12 @@ import styles from "./styles.module.css";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
+  // Se vier do Shopify com ?shop=..., manda para /app mantendo TODOS os params
   if (url.searchParams.get("shop")) {
-    throw Response.redirect(`/app?${url.searchParams.toString()}`, 302);
+    const target = new URL("/app", url.origin);
+    target.search = url.search; // mantém embedded=1, hmac, host, id_token, shop, etc.
+
+    throw Response.redirect(target.toString(), 302);
   }
 
   return { showForm: Boolean(login) };
@@ -25,7 +29,7 @@ export default function App() {
           A tagline about [your app] that describes your value proposition.
         </p>
 
-        {showForm && (
+        {showForm ? (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
               <span>Shop domain</span>
@@ -36,20 +40,17 @@ export default function App() {
               Log in
             </button>
           </Form>
-        )}
+        ) : null}
 
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Product feature</strong>. Some detail about your feature and its benefit.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Product feature</strong>. Some detail about your feature and its benefit.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Product feature</strong>. Some detail about your feature and its benefit.
           </li>
         </ul>
       </div>
