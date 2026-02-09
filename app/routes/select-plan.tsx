@@ -3,7 +3,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
-import { redirect } from "@react-router/node";
+
 import { authenticate } from "../shopify.server";
 
 import {
@@ -29,16 +29,12 @@ type LoaderData = {
   }>;
 };
 
+
 export async function loader({ request }: LoaderFunctionArgs) {
-  // garante sessão (ajusta se o teu helper for outro)
+  const { authenticate } = await import("../shopify.server");
   const { session } = await authenticate.admin(request);
 
-  // se por algum motivo não houver shop, manda para auth
-  if (!session?.shop) {
-    throw redirect("/auth");
-  }
-
-  const data: LoaderData = {
+  const data = {
     ok: true,
     shop: session.shop,
     plans: [
@@ -48,7 +44,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ],
   };
 
-  // ✅ sem json() — para não rebentar no Render
   return new Response(JSON.stringify(data), {
     status: 200,
     headers: { "Content-Type": "application/json" },
